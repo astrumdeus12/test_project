@@ -1,10 +1,11 @@
 from decimal import Decimal
-from database.dao import Transaction
+from database.dao import Transaction, User
 from database.settings import get_async_session
-from ...dto.transaction_schema import TransactionSchema
+from ...dto.transaction_schema import TransactionSchema, TransactionStatus
 from .user_functions import get_user_or_none, increase_balance, decrease_balance
 from datetime import date 
 from logs.settings import transaction_logger
+from sqlalchemy import select, or_
 
 
 
@@ -70,3 +71,39 @@ async def balance_withdrawal(user_id : int, amount : Decimal):
             
             transaction_logger.info(f'Транзакция: вывод {amount} пользователь {user_id} статус: {status}')
             return text
+        
+        
+        
+async def filter_transactions(status : TransactionStatus, start_date, end_date, page, user : User):
+    
+        async for session in get_async_session():
+            async with session.begin():
+                page_size = 10
+                
+                
+                query = select(Transaction).where(or_(
+                (Transaction.sender_id == user.id), (Transaction.recipient_id == user.id)))
+                
+
+                if status:
+                    query = query.where(Transaction.status == status.value)
+
+    
+                if start_date:
+                    query = query.where(Transaction.day >= start_date)
+
+                if end_date:
+                    query = query.where(Transaction.day <= end_date)
+                    
+                result = await session.execute(query)
+                transactions = result.scalars().all()
+
+                total_transactions = len(transactions)
+                transactions = transactions[(page - 1) * page_size: page * page_size]
+        
+                return {
+                "total": total_transactions,
+                "page": page,
+                "page_size": page_size,
+                "transactions": transactions
+                }
